@@ -1,0 +1,12 @@
+# bacformer_prior 依赖（占位；实际安装需用户明确许可 —— 见 MCFProjet/CLAUDE.md 工作规范）
+#
+# 离线分析 / 映射 / 打包（CPU）
+pandas>=2.0
+numpy>=1.26
+#
+# Bacformer 前向（需 GPU；bacformer 包内置 ESM-2，经 protein_seqs_to_bacformer_inputs 调用）
+torch>=2.6
+# transformers          # 版本待与 bacformer 包对齐
+# bacformer             # https://github.com/macwiatrak/Bacformer ；安装方式待定
+#
+# 基因组下载：NCBI datasets CLI 单独装（conda -c conda-forge ncbi-datasets-cli），非 pip 依赖

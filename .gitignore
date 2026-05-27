@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.ipynb_checkpoints/
+.DS_Store
+.vscode/
+
+# 大文件产物一律进 MCFProjet/data/bacformer_prior/（根级已 gitignored），不进本仓库。
+# 下面是兜底：万一有人把产物误放进本目录，也不入 git。
+/data/
+logs/
+*.faa
+*.faa.gz
+*.fna
+*.fna.gz
+*.npz
+*.npy
+*.pt
+*.h5
+*.h5ad
+ncbi_dataset*/
+*.zip
