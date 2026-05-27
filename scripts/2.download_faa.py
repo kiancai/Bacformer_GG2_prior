@@ -113,10 +113,13 @@ def main() -> None:
                 missing.append(acc)
             elif st == "error":
                 errors.append(acc)
-            if i % 500 == 0 or i == len(accs):
-                rate = i / max(time.time() - t0, 1e-6)
-                print(f"  [{i:,}/{len(accs):,}] ok={counts['ok']} skip={counts['skip']} "
-                      f"missing={counts['missing']} error={counts['error']} | {rate:.1f}/s", flush=True)
+            if i % 200 == 0 or i == len(accs):
+                el = time.time() - t0
+                rate = i / max(el, 1e-6)
+                eta = (len(accs) - i) / max(rate, 1e-6)
+                print(f"  [{i:,}/{len(accs):,} {i/len(accs)*100:4.1f}%] "
+                      f"ok={counts['ok']} skip={counts['skip']} missing={counts['missing']} "
+                      f"error={counts['error']} | {rate:.1f}/s 已用{el/60:.0f}min ETA{eta/60:.0f}min", flush=True)
 
     with open(f"{LOG_DIR}/missing_protein.txt", "w") as f:
         f.write("\n".join(missing) + ("\n" if missing else ""))
