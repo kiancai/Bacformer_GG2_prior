@@ -6,6 +6,7 @@
 | 脚本 | 步骤 | 算力 | 产出（→ `data/bacformer_prior/`） |
 |---|---|---|---|
 | `0.audit_coverage.py` | 全 8114 词表对 GTDB r220 的覆盖率审计（read-only，先做） | CPU | `coverage_audit.tsv`（每 genus：是否有基因组 / K_g / match 类型 / 盲区标记） |
+| `0b.blindspot_audit.py` | 盲区菌刻画 + phylo 借力可行性（read-only，喂 fallback 设计） | CPU | stdout（Domain/门/丰度/借力距离/共享秩） |
 | `1.build_mapping.py` | genus -> GTDB r220 各 species 代表基因组 accession | CPU | `genus_to_genomes.tsv` |
 | `2.download_faa.py` | NCBI datasets CLI 批量取 `.faa.gz` | IO（无 GPU） | `faa/<accession>.faa.gz` |
 | `3.embed.py` | Bacformer-large 前向，每基因组 dense 向量 | **GPU** | `genome_embeddings/`（{accession: vec}） |
