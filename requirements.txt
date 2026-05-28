@@ -1,23 +1,48 @@
 # bacformer_prior 依赖（实际安装需用户明确许可 —— 见 MCFProjet/CLAUDE.md 工作规范）
 #
-# ⚠️ transformers 必须 < 5  ⚠️
-# 实测 (2026-05-28): transformers 5.x major upgrade 改了 from_pretrained 流程,
-# 加载后 persistent=False buffer (如 BacformerEncoder.freqs_cos / freqs_sin RoPE 表)
-# 被重分配成未初始化内存, 覆盖 __init__ 里 precompute_freqs_cis 算好的真实值,
-# 导致 forward 全 NaN (toy 和 real 蛋白都崩)。
-# pip 默认 resolve 装最新 5.x, 必须显式 pin <5。
-# 实测可用版本: transformers 4.57.6 (与 HF Discussion #1 用户同款)。
+# ⚠️ 版本必须严格 pin ⚠️
+# 实测（2026-05-29）"严格按 bacformer 作者 README 推荐"装包是不够的——
+# 作者 pyproject 用 `>=` 给一个最低版本兜底,但 pip 默认拉最新版,
+# 而最新版通常引入了 breaking changes / 与作者写时的生态不兼容.
+# 详细踩坑历程见 .claude/docs/bacformer_prior/experiments.md §8.
 #
-# 离线分析 / 映射 / 打包 (CPU)
-pandas>=2.0
-numpy>=1.26
+# === 必须 pin 的关键依赖 (3 项不 pin 会死) ===
+# transformers <5,且 < 4.50
+#   - 5.x major upgrade 改了 from_pretrained 流程,persistent=False buffer (如
+#     BacformerEncoder.freqs_cos) 加载后被重分配为 empty 内存 → forward 全 NaN
+#   - 4.50+ 移除了 transformers.models.esm.modeling_esm.BaseModelOutputWithPastAndCrossAttentions
+#     re-export,导致 faesm 0.1.1 import 失败 → bacformer 退回 HF SDPA = 失去 2x 加速
+#   - 实测可工作: 4.46.3 (与 faesm 0.1.1 写时 2024-12 同代)
+# flash-attn 2.7.x (不 8.x)
+#   - 2.8.x 用了 torch.library.wrap_triton API,只在 torch 2.6+ 存在
+#   - 作者推荐的 torch>=2.2 + cu121 wheel = torch 2.5.1+cu121,与 flash-attn 2.7.x 配
+#   - 实测可工作: flash-attn 2.7.4.post1
+# torch 与 cuda-toolkit / flash-attn 必须配对
+#   - cuda-toolkit-12.1 + torch 2.5.1+cu121 + flash-attn 2.7.4.post1 (作者 README 路线)
 #
-# 蛋白预测 (2b prodigal, CPU)
-pyrodigal>=3.7
+# === 安装顺序 (按作者 README troubleshooting 一字不改,但 pin 版本) ===
+# conda create -n caiqy_bacformer_prior python=3.10 -y
+# conda install -n caiqy_bacformer_prior -c nvidia/label/cuda-12.1.0 cuda-toolkit -y
+# 然后激活 env,装下面所有 pip 包:
+#   pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121
+#   pip install --no-build-isolation --no-cache-dir flash-attn==2.7.4.post1
+#   pip install transformers==4.46.3 bacformer==0.2.0 faesm==0.1.1 pyrodigal==3.7.1
 #
-# Bacformer 前向 (3 embed, 需 GPU; bacformer 包内置 ESM-2 t12 35M, 由 protein_seqs_to_bacformer_inputs 自动调用)
-torch>=2.5,<3
-transformers>=4.45,<5     # ⚠️ 必须 4.x; 5.x 引入持久化 buffer 加载 bug (见上)
-bacformer>=0.2,<0.3       # https://github.com/macwiatrak/Bacformer
+# === CentOS 7 glibc 2.17 太老 ===
+# flash-attn 编译产物要 GLIBC_2.32+,CentOS 7 系统 glibc 2.17 不满足.
+# 用 /home/cml_lab/caiqy/glibc 的 glibc 2.35 包装启动 python.
+# 详见 scripts/_run_with_glibc.sh.
 #
-# 基因组下载: 直接走 NCBI Datasets API (urllib 标准库), 无需 datasets CLI
+# === 离线分析 / 映射 / 打包 (CPU) ===
+pandas==2.3.2
+numpy>=1.26,<2.4
+#
+# === 蛋白预测 (2b prodigal, CPU) ===
+pyrodigal==3.7.1
+#
+# === Bacformer 前向 (3 embed, 需 GPU) ===
+torch==2.5.1               # cu121 wheel,需从 PyTorch 官方 index 装
+transformers==4.46.3       # ⚠️ 必须这个版本,不能升级
+faesm==0.1.1               # ⚠️ pip 装时不带 [flash_attn] extra,单独装 flash-attn
+flash-attn==2.7.4.post1    # ⚠️ 必须 2.7.x,需 --no-build-isolation 编译
+bacformer==0.2.0           # https://github.com/macwiatrak/Bacformer

@@ -66,7 +66,9 @@ def load_mapping_and_quality() -> tuple[dict[int, list[str]], dict[str, float]]:
         for row in csv.DictReader(f, delimiter="\t"):
             quality[row["accession"]] = float(row["quality_score"])
     for t, accs in token_to_accs.items():
-        token_to_accs[t] = sorted(set(accs), key=lambda a: -quality.get(a, -1e9))
+        # 用 (negative quality, accession 名) 做 key, accession 名作 tiebreaker,
+        # 避免 quality 相同时 set 迭代顺序非确定性 (老 bug: 同一 K_max 两次跑选种数差 1)
+        token_to_accs[t] = sorted(set(accs), key=lambda a: (-quality.get(a, -1e9), a))
     return token_to_accs, quality
 
 
@@ -201,11 +203,23 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--K-max", type=int, default=32, help="每属保留 species 数（决策门 3.1，默认 32）")
     ap.add_argument("--gpu", type=int, default=0, help="GPU index（CUDA_VISIBLE_DEVICES）")
-    ap.add_argument("--limit", type=int, default=0, help=">0 时只跑前 N 个 acc（pilot）")
+    ap.add_argument("--shard", type=str, default="0/1",
+                    help="分片 'X/N': 跑 N 卡分片的第 X 份 (X∈[0,N), 0-indexed)。"
+                         " 默认 '0/1' = 不分片;'0/2' + '1/2' 配对跑两卡。"
+                         " 按 acc 字母序均匀切分,各卡互不重叠,保证全量并集 = 单卡跑。")
+    ap.add_argument("--limit", type=int, default=0, help=">0 时只跑前 N 个 acc（pilot,在分片之后切片）")
     ap.add_argument("--token-ids", type=str, default="", help="逗号分隔 token_idx，仅跑这些 token 的 acc（debug）")
     ap.add_argument("--max-proteins", type=int, default=MAX_PROTEINS, help="单基因组蛋白上限（默认 6000）")
     ap.add_argument("--dry-run", action="store_true", help="不加载模型、不写文件，只列待跑 acc + 估算时长")
     args = ap.parse_args()
+
+    # 解析 --shard X/N
+    try:
+        _x, _n = args.shard.split("/")
+        shard_idx, shard_total = int(_x), int(_n)
+        assert shard_total >= 1 and 0 <= shard_idx < shard_total
+    except (ValueError, AssertionError):
+        raise SystemExit(f"--shard 必须形如 '0/1' / '0/2' / '1/2',got: {args.shard}")
 
     os.makedirs(EMB_DIR, exist_ok=True)
     os.makedirs(LOG_DIR, exist_ok=True)
@@ -220,8 +234,14 @@ def main() -> None:
         token_filter = {int(x) for x in args.token_ids.split(",") if x.strip()}
         print(f"token filter: {len(token_filter)} tokens", flush=True)
     accs = select_accs_for_embed(token_to_accs, args.K_max, token_filter)
+    n_total = len(accs)
+    # 分片: 按 acc 字母序 stride 切 (acc[i] → 卡 i%N), 保证均匀 + 各卡互不重叠
+    if shard_total > 1:
+        accs = [a for i, a in enumerate(accs) if i % shard_total == shard_idx]
+        print(f"分片 {shard_idx}/{shard_total}: 全量 {n_total:,} → 本卡 {len(accs):,} acc", flush=True)
     if args.limit:
         accs = accs[: args.limit]
+        print(f"limit={args.limit} → 试跑前 {len(accs)} 个 acc", flush=True)
     print(f"待 embed {len(accs):,} 个 acc（K_max={args.K_max}）", flush=True)
 
     if args.dry_run:
