@@ -52,11 +52,18 @@ def load_accessions(path: str) -> list[str]:
     return sorted(accs)
 
 
-def fetch_one(acc: str, retries: int = 4) -> str:
-    """返回状态：'ok' / 'skip' / 'missing'(无蛋白) / 'error'。"""
+def fetch_one(acc: str, known_missing: set, retries: int = 4) -> str:
+    """返回状态：'ok' / 'skip' / 'skip_missing' / 'missing'(无蛋白) / 'error'。
+
+    断点续：
+    - faa/<acc>.faa.gz 已落 → 'skip'（不打 API）。
+    - acc 在 known_missing（上次跑发现 NCBI 无注释）→ 'skip_missing'（不打 API）。
+    """
     out = f"{FAA_DIR}/{acc}.faa.gz"
     if os.path.exists(out) and os.path.getsize(out) > 0:
         return "skip"
+    if acc in known_missing:
+        return "skip_missing"
     url = API.format(to_ncbi(acc))
     for attempt in range(retries):
         try:
@@ -98,19 +105,28 @@ def main() -> None:
         f.write("\n".join(to_ncbi(a) for a in accs) + "\n")
     if args.limit:
         accs = accs[: args.limit]
-    print(f"唯一 accession {len(accs):,}（已存的会跳过）；workers={args.workers}")
 
-    counts = {"ok": 0, "skip": 0, "missing": 0, "error": 0}
-    missing, errors = [], []
+    # 断点续：载入上次跑的 missing_protein.txt（NCBI 无注释、不会有 .faa.gz 落盘），
+    # 这次直接跳过、不再打 API。结尾合并 (旧 ∪ 新发现) 再写回。
+    missing_path = f"{LOG_DIR}/missing_protein.txt"
+    known_missing: set = set()
+    if os.path.exists(missing_path):
+        with open(missing_path) as f:
+            known_missing = {l.strip() for l in f if l.strip()}
+    print(f"唯一 accession {len(accs):,}（已存的会跳过）；"
+          f"已知 missing {len(known_missing):,}（也跳过）；workers={args.workers}")
+
+    counts = {"ok": 0, "skip": 0, "skip_missing": 0, "missing": 0, "error": 0}
+    new_missing, errors = [], []
     t0 = time.time()
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
-        futs = {ex.submit(fetch_one, a): a for a in accs}
+        futs = {ex.submit(fetch_one, a, known_missing): a for a in accs}
         for i, fut in enumerate(as_completed(futs), 1):
             acc = futs[fut]
             st = fut.result()
             counts[st] += 1
             if st == "missing":
-                missing.append(acc)
+                new_missing.append(acc)
             elif st == "error":
                 errors.append(acc)
             if i % 200 == 0 or i == len(accs):
@@ -118,15 +134,18 @@ def main() -> None:
                 rate = i / max(el, 1e-6)
                 eta = (len(accs) - i) / max(rate, 1e-6)
                 print(f"  [{i:,}/{len(accs):,} {i/len(accs)*100:4.1f}%] "
-                      f"ok={counts['ok']} skip={counts['skip']} missing={counts['missing']} "
-                      f"error={counts['error']} | {rate:.1f}/s 已用{el/60:.0f}min ETA{eta/60:.0f}min", flush=True)
+                      f"ok={counts['ok']} skip={counts['skip']} skip_missing={counts['skip_missing']} "
+                      f"missing={counts['missing']} error={counts['error']} "
+                      f"| {rate:.1f}/s 已用{el/60:.0f}min ETA{eta/60:.0f}min", flush=True)
 
-    with open(f"{LOG_DIR}/missing_protein.txt", "w") as f:
-        f.write("\n".join(missing) + ("\n" if missing else ""))
+    # missing 合并旧 + 这次新发现；error 全量覆盖（这次仍败的才留下，断点续再补）
+    all_missing = sorted(known_missing | set(new_missing))
+    with open(missing_path, "w") as f:
+        f.write("\n".join(all_missing) + ("\n" if all_missing else ""))
     with open(f"{LOG_DIR}/download_errors.txt", "w") as f:
         f.write("\n".join(errors) + ("\n" if errors else ""))
     print(f"\n完成：{counts}")
-    print(f"  无现成蛋白(→Prodigal/2b)：{len(missing)} → logs/missing_protein.txt")
+    print(f"  无现成蛋白合并(→Prodigal/2b)：{len(all_missing)} (新增 {len(new_missing)}) → logs/missing_protein.txt")
     print(f"  报错(可重跑本脚本断点续)：{len(errors)} → logs/download_errors.txt")
     if errors:
         sys.exit(1)
