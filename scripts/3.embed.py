@@ -127,47 +127,31 @@ def read_proteins_ordered(faa_path: str, max_proteins: int = MAX_PROTEINS) -> li
 def _load_bacformer_model(device: str):
     """加载 Bacformer small + ESM-2 t12 35M 底座，返回 embed_one(proteins) callable。
 
-    实测要点（2026-05-28 装包后填）：
-    - 用 AutoModel + trust_remote_code=True（不是 BacformerForMaskedLM）
-    - bfloat16 推理：HF 模型卡推荐
-    - protein_seqs_to_bacformer_inputs 内部已经把蛋白经 ESM-2 编成 480d；输出 shape (B, L_with_special, 480)
-      L_with_special = N_proteins + 特殊 token（CLS/SEP/END 等 ≈ 3 个）
-    - mean over dim=1 把所有蛋白 + special tokens 平均；按 HF model card 这是标准 genome embedding 取法
+    用法对齐 HF model card 标准 example:
+    - AutoModel + trust_remote_code=True
+    - bfloat16 推理
+    - protein_seqs_to_bacformer_inputs 内部已经把蛋白经 ESM-2 编成 480d;
+      输出 shape (B, L_with_special, 480),L_with_special = N_proteins + ~3 special tokens
+    - last_hidden_state.mean(dim=1) 取 genome embedding (HF 标准)
 
-    ⚠️ transformers 5.x + persistent=False buffer 兼容性问题（2026-05-28 实测）：
-    Bacformer 代码本身正确(__init__ 里调 precompute_freqs_cis 算 RoPE 频率表注册为
-    persistent=False buffer)。HF safetensors 文件也正确(根本不存 freqs_cos/sin)。
-    但 `from_pretrained` 用 meta tensor / empty-then-fill 优化加载,把 persistent=False
-    buffer 重新分配成 empty 内存(未初始化垃圾值),覆盖了 __init__ 算好的真实值。
-    state_dict 里没 freqs_cos 键 → 没东西填回去 → buffer 留垃圾或 NaN。
-    实测对比:
-        AutoModel.from_config(config):    fc[0,:5] = [1,1,1,1,1] ✓ cos(0)=1
-        AutoModel.from_pretrained(model): fc[0,:5] = [7e+28, 3e+27, ...] ✗ 垃圾
-    修复:加载后手动调 precompute_freqs_cis 覆盖 freqs_cos/sin,绕开 transformers 加载 bug。
+    ⚠️ 环境约束 (2026-05-28 实测,代价惨痛):
+    必须 transformers >= 4.45, < 5（4.x 末版,实测 4.57.6 OK）。
+    transformers 5.x major upgrade 改了 from_pretrained 流程,
+    persistent=False buffer 在加载后会被重分配成 empty 内存,
+    覆盖 BacformerEncoder.__init__ 里 precompute_freqs_cis 算好的 freqs_cos/sin
+    → 出未初始化垃圾值或 NaN → forward 全 NaN。
+    若用了 transformers 5.x, env 即坏, 必须降回 4.x。详 requirements.txt 注释。
     """
-    import math
     import torch  # 局部 import 避免影响 dry-run 路径
     from bacformer.pp import protein_seqs_to_bacformer_inputs
     from transformers import AutoModel
 
-    model = AutoModel.from_pretrained(BACFORMER_MODEL, trust_remote_code=True).to(device).eval()
-
-    # === 修 HF 权重 bug:重算 freqs_cos / freqs_sin ===
-    # 来自 modeling_bacformer.precompute_freqs_cis (与原版完全一致)
-    def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
-        freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
-        t = torch.arange(end, device=freqs.device)
-        freqs = torch.outer(t, freqs).float()
-        return torch.cos(freqs), torch.sin(freqs)
-
-    end, dim_half = model.encoder.freqs_cos.shape  # 实测 (9000, 30)
-    n_nan_orig = torch.isnan(model.encoder.freqs_cos).sum().item()
-    new_cos, new_sin = precompute_freqs_cis(dim_half * 2, end)
-    model.encoder.freqs_cos = new_cos.to(model.encoder.freqs_cos.device)
-    model.encoder.freqs_sin = new_sin.to(model.encoder.freqs_sin.device)
-    print(f"  [fix] freqs_cos rebuilt: {n_nan_orig} NaN → 0 NaN (shape {tuple(new_cos.shape)})", flush=True)
-
-    model = model.to(torch.bfloat16)
+    model = (
+        AutoModel.from_pretrained(BACFORMER_MODEL, trust_remote_code=True)
+        .to(device)
+        .eval()
+        .to(torch.bfloat16)
+    )
 
     def embed_one(proteins: list[str]) -> np.ndarray:
         # protein_seqs_to_bacformer_inputs 内部用 ESM-2 底座把每蛋白编成 480d

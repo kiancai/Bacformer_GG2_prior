@@ -1,12 +1,23 @@
-# bacformer_prior 依赖（占位；实际安装需用户明确许可 —— 见 MCFProjet/CLAUDE.md 工作规范）
+# bacformer_prior 依赖（实际安装需用户明确许可 —— 见 MCFProjet/CLAUDE.md 工作规范）
 #
-# 离线分析 / 映射 / 打包（CPU）
+# ⚠️ transformers 必须 < 5  ⚠️
+# 实测 (2026-05-28): transformers 5.x major upgrade 改了 from_pretrained 流程,
+# 加载后 persistent=False buffer (如 BacformerEncoder.freqs_cos / freqs_sin RoPE 表)
+# 被重分配成未初始化内存, 覆盖 __init__ 里 precompute_freqs_cis 算好的真实值,
+# 导致 forward 全 NaN (toy 和 real 蛋白都崩)。
+# pip 默认 resolve 装最新 5.x, 必须显式 pin <5。
+# 实测可用版本: transformers 4.57.6 (与 HF Discussion #1 用户同款)。
+#
+# 离线分析 / 映射 / 打包 (CPU)
 pandas>=2.0
 numpy>=1.26
 #
-# Bacformer 前向（需 GPU；bacformer 包内置 ESM-2，经 protein_seqs_to_bacformer_inputs 调用）
-torch>=2.6
-# transformers          # 版本待与 bacformer 包对齐
-# bacformer             # https://github.com/macwiatrak/Bacformer ；安装方式待定
+# 蛋白预测 (2b prodigal, CPU)
+pyrodigal>=3.7
 #
-# 基因组下载：NCBI datasets CLI 单独装（conda -c conda-forge ncbi-datasets-cli），非 pip 依赖
+# Bacformer 前向 (3 embed, 需 GPU; bacformer 包内置 ESM-2 t12 35M, 由 protein_seqs_to_bacformer_inputs 自动调用)
+torch>=2.5,<3
+transformers>=4.45,<5     # ⚠️ 必须 4.x; 5.x 引入持久化 buffer 加载 bug (见上)
+bacformer>=0.2,<0.3       # https://github.com/macwiatrak/Bacformer
+#
+# 基因组下载: 直接走 NCBI Datasets API (urllib 标准库), 无需 datasets CLI
