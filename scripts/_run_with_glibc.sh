@@ -23,12 +23,21 @@ readonly CONDA=/home/cml_lab/anaconda3/envs/caiqy_bacformer_prior
 readonly NVIDIA=/usr/local/nvidia/lib
 
 # ⚠️ 限制 CPU 线程,避免 thread oversubscribe (memory feedback_thread_oversubscribe)
-# cluster 节点 24 CPU 核,torch/numpy/MKL/OpenBLAS 默认各开 24 thread → 互相 thrashing
-# 实测设 4 thread 让 GPU 利用率从 8% peak → 63% peak, 吞吐 271→495 prot/s (+83%)
-export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4}
-export MKL_NUM_THREADS=${MKL_NUM_THREADS:-4}
-export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-4}
-export NUMEXPR_NUM_THREADS=${NUMEXPR_NUM_THREADS:-4}
+# cluster sbatch 申请 24 核;torch/numpy/MKL/OpenBLAS 默认各开 24 thread → 互相 thrashing
+# 实测 (单卡 limit=20):
+#   默认: 271 prot/s, GPU sm 8% peak  ← thrash
+#   OMP=4: 514 prot/s
+#   OMP=8: 523 prot/s ← 略优
+#   OMP=12/16: 502/494 prot/s (退化)
+# 双卡同时跑差异更小 (CPU 不再是瓶颈,GPU forward 自身限速):
+#   OMP=4 双卡: 1078 prot/s 总
+#   OMP=8 双卡: 1085 prot/s 总 ← 微优
+#   OMP=12 双卡: 1065 prot/s 总
+# 取 OMP=8: 单卡略优,双卡微优,双卡占 16/24 核(留 8 核给系统+其他)
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
+export MKL_NUM_THREADS=${MKL_NUM_THREADS:-8}
+export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-8}
+export NUMEXPR_NUM_THREADS=${NUMEXPR_NUM_THREADS:-8}
 
 # 验路径都存在
 for p in "$GLIBC/ld-linux-x86-64.so.2" "$GLIBC/libc.so.6" "$CONDA/bin/python" "$NVIDIA/libcuda.so.1"; do
