@@ -134,10 +134,16 @@ def _load_bacformer_model(device: str):
       L_with_special = N_proteins + 特殊 token（CLS/SEP/END 等 ≈ 3 个）
     - mean over dim=1 把所有蛋白 + special tokens 平均；按 HF model card 这是标准 genome embedding 取法
 
-    ⚠️ HF 权重 bug（2026-05-28 实测）：
-    `encoder.freqs_cos` buffer 上传时序列化坏了，含 ~37-43 个 NaN（散布于 RoPE 频率表）。
-    导致 attention 经 rotary embedding 后污染整个 forward 出 NaN（toy/real 都 NaN）。
-    修复：加载后用标准 RoPE 公式重算 freqs_cos/sin 覆盖。`freqs_sin` 也一起重算保持一致。
+    ⚠️ transformers 5.x + persistent=False buffer 兼容性问题（2026-05-28 实测）：
+    Bacformer 代码本身正确(__init__ 里调 precompute_freqs_cis 算 RoPE 频率表注册为
+    persistent=False buffer)。HF safetensors 文件也正确(根本不存 freqs_cos/sin)。
+    但 `from_pretrained` 用 meta tensor / empty-then-fill 优化加载,把 persistent=False
+    buffer 重新分配成 empty 内存(未初始化垃圾值),覆盖了 __init__ 算好的真实值。
+    state_dict 里没 freqs_cos 键 → 没东西填回去 → buffer 留垃圾或 NaN。
+    实测对比:
+        AutoModel.from_config(config):    fc[0,:5] = [1,1,1,1,1] ✓ cos(0)=1
+        AutoModel.from_pretrained(model): fc[0,:5] = [7e+28, 3e+27, ...] ✗ 垃圾
+    修复:加载后手动调 precompute_freqs_cis 覆盖 freqs_cos/sin,绕开 transformers 加载 bug。
     """
     import math
     import torch  # 局部 import 避免影响 dry-run 路径
