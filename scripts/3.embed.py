@@ -205,7 +205,11 @@ def embed_one_acc(acc: str, embed_fn, max_proteins: int = MAX_PROTEINS) -> tuple
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--K-max", type=int, default=32, help="每属保留 species 数（决策门 3.1，默认 32）")
-    ap.add_argument("--gpu", type=int, default=0, help="GPU index（CUDA_VISIBLE_DEVICES）")
+    # ⚠️ 不再在脚本里设 CUDA_VISIBLE_DEVICES。
+    # 必须在调用脚本前从 wrapper 外部设置 (e.g. `CUDA_VISIBLE_DEVICES=1 bash ... 3.embed.py`).
+    # 之前的 bug: import torch 之后 os.environ['CUDA_VISIBLE_DEVICES']=args.gpu 是 no-op
+    # for torch.cuda,但 ESM-2 forward 时可能延迟读取 env,看到错的 "0" → 实际跑到 GPU 0
+    # = X2 满载那张 → 抢资源失败,fallback 到 ~CPU 速率(实测 GPU util 全程 0%)。
     ap.add_argument("--shard", type=str, default="0/1",
                     help="分片 'X/N': 跑 N 卡分片的第 X 份 (X∈[0,N), 0-indexed)。"
                          " 默认 '0/1' = 不分片;'0/2' + '1/2' 配对跑两卡。"
@@ -227,8 +231,9 @@ def main() -> None:
     os.makedirs(EMB_DIR, exist_ok=True)
     os.makedirs(LOG_DIR, exist_ok=True)
 
-    # 限定 GPU
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
+    # ⚠️ 注意: 不在这里设 CUDA_VISIBLE_DEVICES (见 --gpu 参数注释)。
+    # GPU 由外部 wrapper 通过 env 设定,如:
+    #   CUDA_VISIBLE_DEVICES=1 bash _run_with_glibc.sh 3.embed.py ...
 
     # ── 选 acc ──
     token_to_accs, _quality = load_mapping_and_quality()
@@ -266,8 +271,9 @@ def main() -> None:
         return
 
     # ── 加载模型 ──
-    print(f"loading Bacformer small（GPU {args.gpu}）...", flush=True)
-    embed_fn = _load_bacformer_model(device=f"cuda:0")  # CUDA_VISIBLE_DEVICES 已设
+    cvd = os.environ.get("CUDA_VISIBLE_DEVICES", "(未设,torch 看所有 GPU)")
+    print(f"loading Bacformer small（CUDA_VISIBLE_DEVICES={cvd}, 实际用 cuda:0）...", flush=True)
+    embed_fn = _load_bacformer_model(device="cuda:0")
     print("loaded ✓", flush=True)
 
     # ── 主循环 ──

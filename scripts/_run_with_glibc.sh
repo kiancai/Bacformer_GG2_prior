@@ -22,6 +22,14 @@ readonly GLIBC=/home/cml_lab/caiqy/glibc
 readonly CONDA=/home/cml_lab/anaconda3/envs/caiqy_bacformer_prior
 readonly NVIDIA=/usr/local/nvidia/lib
 
+# ⚠️ 限制 CPU 线程,避免 thread oversubscribe (memory feedback_thread_oversubscribe)
+# cluster 节点 24 CPU 核,torch/numpy/MKL/OpenBLAS 默认各开 24 thread → 互相 thrashing
+# 实测设 4 thread 让 GPU 利用率从 8% peak → 63% peak, 吞吐 271→495 prot/s (+83%)
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4}
+export MKL_NUM_THREADS=${MKL_NUM_THREADS:-4}
+export OPENBLAS_NUM_THREADS=${OPENBLAS_NUM_THREADS:-4}
+export NUMEXPR_NUM_THREADS=${NUMEXPR_NUM_THREADS:-4}
+
 # 验路径都存在
 for p in "$GLIBC/ld-linux-x86-64.so.2" "$GLIBC/libc.so.6" "$CONDA/bin/python" "$NVIDIA/libcuda.so.1"; do
     [ -f "$p" ] || [ -L "$p" ] || { echo "ERROR: $p 不存在,环境失败" >&2; exit 1; }
