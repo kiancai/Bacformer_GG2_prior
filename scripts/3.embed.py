@@ -125,28 +125,58 @@ def read_proteins_ordered(faa_path: str, max_proteins: int = MAX_PROTEINS) -> li
 # ──────────────────────────────────────────────────────────────────────
 
 def _load_bacformer_model(device: str):
-    """加载 Bacformer small + ESM-2 t12 35M 底座，返回可调用对象。
+    """加载 Bacformer small + ESM-2 t12 35M 底座，返回 embed_one(proteins) callable。
 
-    ⚠️ 未实现（2026-05-28 装包后填）。预计实现：
+    实测要点（2026-05-28 装包后填）：
+    - 用 AutoModel + trust_remote_code=True（不是 BacformerForMaskedLM）
+    - bfloat16 推理：HF 模型卡推荐
+    - protein_seqs_to_bacformer_inputs 内部已经把蛋白经 ESM-2 编成 480d；输出 shape (B, L_with_special, 480)
+      L_with_special = N_proteins + 特殊 token（CLS/SEP/END 等 ≈ 3 个）
+    - mean over dim=1 把所有蛋白 + special tokens 平均；按 HF model card 这是标准 genome embedding 取法
 
-        from bacformer.modeling import BacformerForMaskedLM
-        from bacformer.pp import protein_seqs_to_bacformer_inputs
-        model = BacformerForMaskedLM.from_pretrained(BACFORMER_MODEL).to(device).eval()
-        # 返回一个 callable: proteins (list[str]) → vec (np.ndarray (480,) fp32)
-        def embed_one(proteins: list[str]) -> np.ndarray:
-            inputs = protein_seqs_to_bacformer_inputs(proteins)
-            inputs = {k: v.to(device) for k, v in inputs.items()}
-            with torch.no_grad():
-                out = model(**inputs, return_dict=True)
-            vec = out.last_hidden_state.mean(dim=1).squeeze(0).cpu().numpy().astype(np.float32)
-            return vec
-        return embed_one
+    ⚠️ HF 权重 bug（2026-05-28 实测）：
+    `encoder.freqs_cos` buffer 上传时序列化坏了，含 ~37-43 个 NaN（散布于 RoPE 频率表）。
+    导致 attention 经 rotary embedding 后污染整个 forward 出 NaN（toy/real 都 NaN）。
+    修复：加载后用标准 RoPE 公式重算 freqs_cos/sin 覆盖。`freqs_sin` 也一起重算保持一致。
     """
-    raise NotImplementedError(
-        "Bacformer 装包待 task #3 启动时做。需装：torch>=2.6, transformers, bacformer "
-        "（HF repo `macwiatrak/bacformer-masked-complete-genomes` 或源码 build）。"
-        "装好后填本函数实现，骨架其他部分应该一字不改即可用。"
-    )
+    import math
+    import torch  # 局部 import 避免影响 dry-run 路径
+    from bacformer.pp import protein_seqs_to_bacformer_inputs
+    from transformers import AutoModel
+
+    model = AutoModel.from_pretrained(BACFORMER_MODEL, trust_remote_code=True).to(device).eval()
+
+    # === 修 HF 权重 bug:重算 freqs_cos / freqs_sin ===
+    # 来自 modeling_bacformer.precompute_freqs_cis (与原版完全一致)
+    def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
+        freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
+        t = torch.arange(end, device=freqs.device)
+        freqs = torch.outer(t, freqs).float()
+        return torch.cos(freqs), torch.sin(freqs)
+
+    end, dim_half = model.encoder.freqs_cos.shape  # 实测 (9000, 30)
+    n_nan_orig = torch.isnan(model.encoder.freqs_cos).sum().item()
+    new_cos, new_sin = precompute_freqs_cis(dim_half * 2, end)
+    model.encoder.freqs_cos = new_cos.to(model.encoder.freqs_cos.device)
+    model.encoder.freqs_sin = new_sin.to(model.encoder.freqs_sin.device)
+    print(f"  [fix] freqs_cos rebuilt: {n_nan_orig} NaN → 0 NaN (shape {tuple(new_cos.shape)})", flush=True)
+
+    model = model.to(torch.bfloat16)
+
+    def embed_one(proteins: list[str]) -> np.ndarray:
+        # protein_seqs_to_bacformer_inputs 内部用 ESM-2 底座把每蛋白编成 480d
+        # （内部 batch_size 控制 ESM-2 前向的 batch；与 Bacformer 自身 batch 无关）
+        inputs = protein_seqs_to_bacformer_inputs(
+            proteins, device=device, batch_size=128, max_n_proteins=MAX_PROTEINS,
+        )
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+        with torch.no_grad():
+            out = model(**inputs, return_dict=True)
+        # last_hidden_state: (1, L_with_special, 480) → mean → (1, 480) → (480,) fp32
+        vec = out["last_hidden_state"].mean(dim=1).squeeze(0).float().cpu().numpy().astype(np.float32)
+        return vec
+
+    return embed_one
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -170,9 +200,10 @@ def embed_one_acc(acc: str, embed_fn, max_proteins: int = MAX_PROTEINS) -> tuple
         print(f"  ERROR {acc}: {type(e).__name__}: {e}", flush=True)
         return "error", len(proteins), None
     assert vec.shape == (HIDDEN_SIZE,), f"vec shape {vec.shape} != ({HIDDEN_SIZE},)"
-    tmp = out_path + ".tmp"
-    np.save(tmp, vec)
-    os.replace(tmp, out_path)
+    # np.save 会自动加 .npy 后缀；给一个不含 .npy 的临时基名,落盘后改 rename
+    tmp_base = out_path[:-4] + ".tmp"  # 'X.npy' -> 'X.tmp', np.save 会加 .npy
+    np.save(tmp_base, vec)
+    os.replace(tmp_base + ".npy", out_path)
     return "ok", len(proteins), vec
 
 
