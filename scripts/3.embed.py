@@ -157,9 +157,12 @@ def _load_bacformer_model(device: str):
 
     def embed_one(proteins: list[str]) -> np.ndarray:
         # protein_seqs_to_bacformer_inputs 内部用 ESM-2 底座把每蛋白编成 480d
-        # （内部 batch_size 控制 ESM-2 前向的 batch；与 Bacformer 自身 batch 无关）
+        # batch_size 控制 ESM-2 forward 的 mini-batch
+        # 实测 (experiments.md §8.10 后续):
+        # 128 → 256 加速 +15%(493→567 prot/s),  256 → 512 仅 +2% (饱和)
+        # 256 显存峰值 4.2GB,A100 40GB 绰绰有余
         inputs = protein_seqs_to_bacformer_inputs(
-            proteins, device=device, batch_size=128, max_n_proteins=MAX_PROTEINS,
+            proteins, device=device, batch_size=256, max_n_proteins=MAX_PROTEINS,
         )
         inputs = {k: v.to(device) for k, v in inputs.items()}
         with torch.no_grad():
