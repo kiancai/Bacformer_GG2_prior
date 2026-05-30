@@ -229,8 +229,9 @@ def save_outputs(
     fallback_threshold: float,
     version: str,
     formats: list[str],
+    out_prefix: str = "genus_prior",
 ) -> None:
-    base = f"{DATA}/genus_prior"
+    base = f"{DATA}/{out_prefix}"
     meta = {
         "K_max": K_max,
         "version": version,
@@ -280,6 +281,8 @@ def main() -> None:
                     help="同 Family + patristic<X 才借（决策门 4.1，默认 6.0；experiments.md §7.2 推荐）")
     ap.add_argument("--output-formats", nargs="+", default=["npz", "pt"], choices=["npz", "pt"])
     ap.add_argument("--version", default="small_v1_r220_gg2_2409", help="产物 version 字符串")
+    ap.add_argument("--out-prefix", default="genus_prior",
+                    help="输出文件名前缀(默认 genus_prior);半量验证 / K_max 扫描用别名避免覆盖正式产物")
     ap.add_argument("--dry-run", action="store_true", help="不读 npy、不写文件，仅算 fallback 决策 + 输出 stats")
     args = ap.parse_args()
 
@@ -329,9 +332,10 @@ def main() -> None:
         save_outputs(
             species_tensor, species_mask, mean_tensor, mean_mask,
             args.K_max, args.fallback_threshold, args.version, args.output_formats,
+            args.out_prefix,
         )
         # 写报告
-        with open(f"{DATA}/pack_report.txt", "w") as f:
+        with open(f"{DATA}/{args.out_prefix}_pack_report.txt", "w") as f:
             f.write(f"K_max={args.K_max}\nfallback_threshold={args.fallback_threshold}\nversion={args.version}\n\n")
             f.write(f"V_real={V_real}\n")
             f.write(f"has_genome_tokens={len(has_genome_tokens)}\n")
@@ -341,7 +345,7 @@ def main() -> None:
             f.write(f"  masked (diff Family):     {n_mask_d}\n\n")
             f.write(f"pack stats: {stats}\n")
             f.write(f"mean_mask.sum() = {mean_mask.sum()} / {V_real} ({100*mean_mask.sum()/V_real:.2f}%)\n")
-        print(f"  wrote {DATA}/pack_report.txt")
+        print(f"  wrote {DATA}/{args.out_prefix}_pack_report.txt")
 
     print("\n完成 ✓")
 
