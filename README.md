@@ -78,9 +78,9 @@ pip install -e .
 # 详见 scripts/README.md
 
 # 0–4：从 MCFProjet 根目录跑
-python bacformer_prior/scripts/0.audit_coverage.py
-python bacformer_prior/scripts/1.build_mapping.py
-python bacformer_prior/scripts/2.download_faa.py    # IO 密集；断点续；几小时
+python data/bacformer_prior/_src/scripts/0.audit_coverage.py
+python data/bacformer_prior/_src/scripts/1.build_mapping.py
+python data/bacformer_prior/_src/scripts/2.download_faa.py    # IO 密集；断点续；几小时
 # ... 2b / 3 / 4 见 scripts/README.md
 ```
 
