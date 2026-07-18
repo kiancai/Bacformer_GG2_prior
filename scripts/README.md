@@ -1,48 +1,85 @@
-# scripts — bacformer_prior CLI 入口
+# BacFormer prior 生产脚本
 
-沿用 MCFProjet 子项目约定：**编号脚本 = 1 对 1 CLI wrapper，每个脚本 = 一个步骤**。
+编号脚本是一条顺序生产链。正常模型训练不需要重跑；下列入口会写
+`data/bacformer_prior/`，只在明确的重建任务中执行。
 
-| 脚本 | 步骤 | 算力 | 状态 | 产出（→ `data/bacformer_prior/`） |
-|---|---|---|---|---|
-| `0.audit_coverage.py` | 全 8114 词表对 GTDB r220 覆盖率审计（read-only） | CPU | ✅ | `coverage_audit.tsv`（含 K_g / match / 盲区） |
-| `0b.blindspot_audit.py` | 盲区菌刻画 + phylo 借力可行性（read-only） | CPU | ✅ | stdout（Domain/门/丰度/借力距离） |
-| `1.build_mapping.py` | genus → GTDB r220 各 species 代表基因组 | CPU | ✅ | `genus_to_genomes.tsv`（98,255 行 / **62,373 唯一基因组**） |
-| `2.download_faa.py` | 取 NCBI 现成蛋白 `.faa`（**用户手动跑**；断点续/并行；无注释的记 missing） | IO | ✅ | `faa/<acc>.faa.gz`（40,870 落） + `logs/{missing_protein,accessions,download_errors}.txt` |
-| `2b.prodigal.py` | 对 `missing_protein.txt` (~21.5k 个) 下 `.fna` + **pyrodigal** 现做蛋白 | CPU+IO | 🔄 跑中（用户手动） | `faa/<acc>.faa.gz`（追加 ~21k） + `logs/prodigal_{no_fna,zero,errors}.txt` |
-| `_build_quality_cache.py` | （内部辅助）从 GTDB metadata 抽 `quality_score = completeness − 5×contam` | CPU | ✅ | `acc_quality.tsv`（供 3/4 选种） |
-| `3.embed.py` | **small** Bacformer 前向（480 维），每基因组一向量；按 K_max cap | **GPU** | 🟡 骨架（待装 `bacformer`+ESM-2 填实 forward） | `genome_embeddings/<acc>.npy`（每基因组 480d fp32） |
-| `4.pack_tensor.py` | 聚合/padding `(V, K_max, 480)` + mask + fallback 补盲区；同时落 `species` + `mean` 两版 | CPU | ✅ 骨架（dry-run 跑通） | `genus_prior.species.{npz,pt}` + `genus_prior.mean.{npz,pt}` + `pack_report.txt` |
+## 当前阶段状态
 
-## 算力 / 依赖
+| 脚本 | 作用 | 算力 | 2026-07-15 在盘状态 |
+|---|---|---|---|
+| `0.audit_coverage.py` | GG2 8,114 genus 对 GTDB r220 覆盖审计 | CPU | 完成；7,717 exact、397 none |
+| `0b.blindspot_audit.py` | blindspot 与 phylogenetic fallback 可行性分析 | CPU | 完成；只输出分析 |
+| `1.build_mapping.py` | genus 到 GTDB species representative mapping | CPU | 完成；98,255 行、62,373 unique accession |
+| `_build_quality_cache.py` | completeness/contamination/protein-count quality cache | CPU | 完成；62,373 行 |
+| `2.download_faa.py` | NCBI PROT_FASTA 下载 | IO | 完成；与 2b 合计 62,177 个 FASTA |
+| `2b.prodigal.py` | 无 PROT_FASTA 时下载 FNA 并用 pyrodigal 预测 | CPU+IO | 完成；196 个 accession 无可用 FNA |
+| `3.embed.py` | Bacformer small per-genome 480d embedding | GPU | 完成当前需求；44,152 个 embedding |
+| `4.build_protein_prior.py` | quality aggregation、fallback、centered cosine distance | CPU | 当前正式路线；已生成 8,114 行 prior |
+| `4.pack_tensor.py` | 旧 padding tensor 原型 | CPU | 非当前正式路线；保留追溯 |
 
-- 仅 `3.embed.py` 需 GPU。`0/0b/1/_build_quality_cache` 可在 GPU 被占时先跑。
-- 起长任务（下载 / GPU 前向）前，先在 `.claude/docs/ACTIVE_WORK.md` 看板登记。
-- **env**：
-  - `MiCoFormerV2`（项目主 env）—— 跑 0/0b/1/2/_build_quality_cache/4
-  - **`caiqy_bacformer_prior`**（独立 env, python 3.11 + pyrodigal 3.7.1）—— 跑 2b；后续装 `bacformer`+`torch`+ESM-2 后也跑 3
-- Bacformer 主路用 **small**（480 维，ESM-2 t12 35M 底座）；large（960 维 / ESM-C 300M，GPU ~10×）留作升级版备选。
+## 环境边界
 
-## 命令速查
+- `MiCoFormerV2`：0/0b/1/2/quality cache/4。
+- `caiqy_bacformer_prior`：2b 与 3；现场环境为 Python 3.10.20、pyrodigal 3.7.1，Bacformer
+  small + ESM-2 t12 35M。
+- `3.embed.py` 依赖本地 glibc wrapper。GPU 卡由 Slurm `GRES IDX` 决定，必须在外部显式设置
+  `CUDA_VISIBLE_DEVICES`；脚本没有 `--gpu` 参数。
+- 未经用户明确许可不安装或升级依赖。`requirements.txt` 记录历史可工作 pin，不是自动安装指令。
+
+## 只读检查
+
+从 MCFProjet 根目录运行：
 
 ```bash
-# 从 MCFProjet 根目录跑（共用账户 conda run 解析错 python，用 env 绝对路径）
+git -C data/bacformer_prior/_src status --short
+git -C data/bacformer_prior/_src rev-parse HEAD
+sed -n '1,200p' data/bacformer_prior/protein_prior/meta.json
 
-# 已跑完
-/home/cml_lab/anaconda3/envs/MiCoFormerV2/bin/python bacformer_prior/scripts/0.audit_coverage.py
-/home/cml_lab/anaconda3/envs/MiCoFormerV2/bin/python bacformer_prior/scripts/0b.blindspot_audit.py
-/home/cml_lab/anaconda3/envs/MiCoFormerV2/bin/python bacformer_prior/scripts/1.build_mapping.py
-/home/cml_lab/anaconda3/envs/MiCoFormerV2/bin/python bacformer_prior/scripts/2.download_faa.py
-/home/cml_lab/anaconda3/envs/MiCoFormerV2/bin/python bacformer_prior/scripts/_build_quality_cache.py
-
-# 跑中（2b prodigal）
-/home/cml_lab/anaconda3/envs/caiqy_bacformer_prior/bin/python bacformer_prior/scripts/2b.prodigal.py --workers 8
-
-# 骨架就绪（等 bacformer 装包 + GPU 上）
-/home/cml_lab/anaconda3/envs/caiqy_bacformer_prior/bin/python bacformer_prior/scripts/3.embed.py --limit 100 --gpu 0     # pilot
-/home/cml_lab/anaconda3/envs/caiqy_bacformer_prior/bin/python bacformer_prior/scripts/3.embed.py --K-max 32 --gpu 0      # 全量
-
-# 骨架就绪（dry-run 已通过；待 3 完成）
-/home/cml_lab/anaconda3/envs/MiCoFormerV2/bin/python bacformer_prior/scripts/4.pack_tensor.py --K-max 32 --fallback-threshold 6.0
+/home/cml_lab/anaconda3/envs/MiCoFormerV2/bin/python -c \
+  "import numpy as np; p='data/bacformer_prior/protein_prior/'; \
+   print(np.load(p+'protein_feat.npy', mmap_mode='r').shape); \
+   print(np.load(p+'protein_dist.npy', mmap_mode='r').shape); \
+   print(np.load(p+'valid_mask.npy', mmap_mode='r').shape)"
 ```
 
-完整 CLI 参数详解 → `.claude/docs/bacformer_prior/commands.md`。
+## 生产入口
+
+以下只是当前有效入口，不表示应当立即重跑：
+
+```bash
+PY=/home/cml_lab/anaconda3/envs/MiCoFormerV2/bin/python
+
+# 0/1 没有 argparse；不要用 --help 探测，否则会直接执行并重写 TSV
+$PY data/bacformer_prior/_src/scripts/0.audit_coverage.py
+$PY data/bacformer_prior/_src/scripts/0b.blindspot_audit.py
+$PY data/bacformer_prior/_src/scripts/1.build_mapping.py
+$PY data/bacformer_prior/_src/scripts/_build_quality_cache.py
+
+$PY data/bacformer_prior/_src/scripts/2.download_faa.py --workers 8
+/home/cml_lab/anaconda3/envs/caiqy_bacformer_prior/bin/python \
+  data/bacformer_prior/_src/scripts/2b.prodigal.py --workers 8
+
+# dry-run 不加载模型、不写 embedding
+/home/cml_lab/anaconda3/envs/caiqy_bacformer_prior/bin/python \
+  data/bacformer_prior/_src/scripts/3.embed.py --K-max 32 --dry-run
+
+# GPU embedding：<allocated-index> 必须与当前 Slurm 分配一致
+CUDA_VISIBLE_DEVICES=<allocated-index> \
+  bash data/bacformer_prior/_src/scripts/_run_with_glibc.sh \
+  data/bacformer_prior/_src/scripts/3.embed.py --K-max 32 --shard 0/1
+
+OMP_NUM_THREADS=4 $PY data/bacformer_prior/_src/scripts/4.build_protein_prior.py \
+  --K-max 32 --weighting quality --fallback-threshold 6.0 \
+  --out-dir protein_prior
+```
+
+## 重建前置条件
+
+1. 在 MCFProjet `.agent/project/active_work.md` 登记任务；GPU 另做 Slurm/CUDA preflight。
+2. 保存当前输入、mapping、最终数组和 `meta.json` 的 hash，不覆盖唯一证据。
+3. 记录 producer commit、完整命令、环境、GG2 index hash、四个 GTDB hash、模型 revision/hash。
+4. 输出 selected genomes/weights、fallback donor/status 与最终文件 hash，形成真正的 build manifest。
+5. 完成后按 MCFProjet 数据 registry 和实验回写规则更新活动文档。
+
+集成侧的完整命令说明以 MCFProjet
+`.agent/data/resources/bacformer_prior/commands.md` 为准。

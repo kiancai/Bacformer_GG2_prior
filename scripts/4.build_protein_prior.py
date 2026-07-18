@@ -1,8 +1,4 @@
-"""4. 构建 genus 级 protein prior：genus 特征聚合 + centered cosine 距离矩阵（Tree-W 用）。
-
-方向依据：decisions.md §21 + experiments.md §8.16
-  撤「可学 attention pool / x2 坐标回归」→ 定「双 Tree-W」：protein 距离矩阵加权 vocab 预测。
-  protein 特征不再当回归 target，而是 ① 算距离矩阵喂 Tree-W ②（可选）输入先验。
+"""4. 构建 genus 级 protein prior：聚合特征与 centered cosine 距离矩阵。
 
 承接 3.embed 的 genome_embeddings/<acc>.npy，按属：
   1. quality 加权聚合 K 个基因组 embedding → genus 特征 (V_real, 480)
@@ -13,12 +9,14 @@
 产物（data/bacformer_prior/protein_prior/）：
   protein_dist.npy   (V_real,V_real) f32  ← Tree-W 距离矩阵（主产物，d = 1 - centered_cosine ∈ [0,2]）
   protein_feat.npy   (V_real,480)    f32  ← centered genus 特征（可选输入先验）
-  valid_mask.npy     (V_real,)       bool ← True=有真实/借来的特征；False=完全盲区（Tree-W 端跳过）
+  valid_mask.npy     (V_real,)       bool ← True=有真实/借来的特征；False=完全盲区
   meta.json          K_max/weighting/metric/dist_scale/n_valid/n_borrowed/n_invalid/...
 
+注意：valid_mask 是资源审计产物；当前 MiCoFormer 消费者不会自动加载它。
+
 用法（MCFProjet 根目录）：
-  python bacformer_prior/scripts/4.build_protein_prior.py --K-max 32 --weighting quality
-  python bacformer_prior/scripts/4.build_protein_prior.py --half-check   # 用现有 embedding 验证逻辑
+  python data/bacformer_prior/_src/scripts/4.build_protein_prior.py --K-max 32 --weighting quality
+  python data/bacformer_prior/_src/scripts/4.build_protein_prior.py --half-check
   OMP_NUM_THREADS=4 ... 前缀防 BLAS 线程 oversubscribe
 
 env: caiqy_bacformer_prior 或 MiCoFormerV2（numpy + anndata）
@@ -45,7 +43,7 @@ D = 480  # Bacformer small embedding 维度
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Load inputs（复用 4.pack_tensor.py 的加载逻辑）
+# Load inputs
 # ──────────────────────────────────────────────────────────────────────
 
 def load_mapping_quality_audit():

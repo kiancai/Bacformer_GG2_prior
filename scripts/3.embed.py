@@ -1,27 +1,19 @@
-"""3. Bacformer small 前向：每基因组一个 480 维 dense vec（GPU，需装 bacformer+ESM-2）。
-
-⚠️ **骨架阶段**（2026-05-28）：
-  数据流 / CLI / IO / 断点续 已完成；
-  Bacformer forward 部分先 `_load_bacformer_model()` placeholder（NotImplementedError），
-  待装 `bacformer` + `transformers` + ESM-2 后填实。
+"""3. Bacformer small 前向：每基因组一个 480 维 dense vec。
 
 承接：2 download + 2b prodigal 后 `faa/<acc>.faa.gz`（~62,200 个）。
-按 K_max cap：每属按 quality 取 top-K_max 个基因组进 embed。pilot 后定 K_max（决策门 3.1）。
+按 K_max cap：每属按 quality 取 top-K_max 个基因组进 embed。当前正式资源使用 K_max=32。
 
 用法（从 MCFProjet 根目录）：
-    # pilot 测吞吐 + 决 K_max
-    python bacformer_prior/scripts/3.embed.py --limit 100 --gpu 0
+    # 只读 dry-run
+    python data/bacformer_prior/_src/scripts/3.embed.py --K-max 32 --dry-run
 
-    # 全量（按 K_max 决定的子集）
-    python bacformer_prior/scripts/3.embed.py --K-max 32 --gpu 0
-
-    # 测某属
-    python bacformer_prior/scripts/3.embed.py --token-ids 100,200,300 --gpu 0
+    # GPU 可见性必须在外部设置；生产运行还需 _run_with_glibc.sh
+    CUDA_VISIBLE_DEVICES=0 python data/bacformer_prior/_src/scripts/3.embed.py --limit 100
 
 输出：
     data/bacformer_prior/genome_embeddings/<acc>.npy  每基因组一个 (480,) fp32 向量
 
-env: caiqy_bacformer_prior（python 3.11 + pyrodigal + 装包后 + bacformer/torch/transformers）
+env: caiqy_bacformer_prior（现场 Python 3.10.20 + bacformer/torch/transformers）
 """
 from __future__ import annotations
 
@@ -231,7 +223,7 @@ def main() -> None:
     os.makedirs(EMB_DIR, exist_ok=True)
     os.makedirs(LOG_DIR, exist_ok=True)
 
-    # ⚠️ 注意: 不在这里设 CUDA_VISIBLE_DEVICES (见 --gpu 参数注释)。
+    # 不在进程内设置 CUDA_VISIBLE_DEVICES；必须由启动命令/Slurm 在 import torch 前限定。
     # GPU 由外部 wrapper 通过 env 设定,如:
     #   CUDA_VISIBLE_DEVICES=1 bash _run_with_glibc.sh 3.embed.py ...
 

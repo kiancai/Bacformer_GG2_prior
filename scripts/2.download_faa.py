@@ -10,9 +10,9 @@
 - 仅用标准库，任何 python3 可跑。
 
 用法（从 MCFProjet 根目录）：
-    python bacformer_prior/scripts/2.download_faa.py                # 全量
-    python bacformer_prior/scripts/2.download_faa.py --workers 8    # 调并行(被限流就调小)
-    python bacformer_prior/scripts/2.download_faa.py --limit 50     # 先小批试跑
+    python data/bacformer_prior/_src/scripts/2.download_faa.py                # 全量
+    python data/bacformer_prior/_src/scripts/2.download_faa.py --workers 8    # 调并行
+    python data/bacformer_prior/_src/scripts/2.download_faa.py --limit 50     # pilot
 
 【更快的替代：NCBI datasets CLI 批量】本脚本会同时导出 logs/accessions.txt；若已装 datasets 二进制可：
     datasets download genome accession --inputfile data/bacformer_prior/logs/accessions.txt \

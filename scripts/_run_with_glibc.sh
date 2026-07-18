@@ -4,16 +4,16 @@
 # 需 GLIBC_2.32+,系统 glibc 2.17 不满足).
 #
 # 用法 (从 MCFProjet 根目录,或任意 cwd):
-#   CUDA_VISIBLE_DEVICES=1 bash bacformer_prior/scripts/_run_with_glibc.sh \
-#       bacformer_prior/scripts/3.embed.py --K-max 32 --shard 0/2 --gpu 0
+#   CUDA_VISIBLE_DEVICES=1 bash data/bacformer_prior/_src/scripts/_run_with_glibc.sh \
+#       data/bacformer_prior/_src/scripts/3.embed.py --K-max 32 --shard 0/2
 #
 # 等价于直接跑:
 #   /home/cml_lab/anaconda3/envs/caiqy_bacformer_prior/bin/python \
-#       bacformer_prior/scripts/3.embed.py --K-max 32 --shard 0/2 --gpu 0
+#       data/bacformer_prior/_src/scripts/3.embed.py --K-max 32 --shard 0/2
 # 但 import flash-attn / faesm 时会因 GLIBC_2.32 not found 而崩.
 #
-# 详细环境复刻过程见 .claude/docs/bacformer_prior/decisions.md §19-§20 +
-# experiments.md §8.
+# 当前环境与命令边界见 MCFProjet
+# .agent/data/resources/bacformer_prior/{commands,provenance}.md。
 
 set -euo pipefail
 

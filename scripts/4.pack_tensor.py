@@ -1,4 +1,6 @@
-"""4. 聚合 + padding + fallback → 最终张量 (V=8114, K_max, 480) + mask + offline mean。
+"""旧原型：聚合 + padding + fallback 张量。
+
+当前正式路线是 4.build_protein_prior.py；本脚本仅为历史追溯，不应与当前 prior 混用。
 
 承接 3.embed 的 `genome_embeddings/<acc>.npy`，按属聚合：
   - 每属取 top-K_max 个基因组（按 quality 排序）padding 到 (K_max, 480) + mask
@@ -7,19 +9,15 @@
     * genus_prior.species.{npz,pt}  → (V, K_max, 480) + mask，给 learned attention pool
     * genus_prior.mean.{npz,pt}     → (V, 480) offline mean pool，资源默认版 + 消融对照
 
-骨架阶段（2026-05-28）：完整实现；可 dry-run（无 embed npy 时仍能跑过 fallback 计算）。
-
 用法（从 MCFProjet 根目录）：
-    python bacformer_prior/scripts/4.pack_tensor.py --K-max 32 --fallback-threshold 6.0
-    python bacformer_prior/scripts/4.pack_tensor.py --K-max 16 --output-formats npz  # 只落 npz
-    python bacformer_prior/scripts/4.pack_tensor.py --dry-run  # 不读 npy，只验 fallback 决策
+    python data/bacformer_prior/_src/scripts/4.pack_tensor.py --dry-run
 
 输出：
     data/bacformer_prior/genus_prior.species.{npz,pt}
     data/bacformer_prior/genus_prior.mean.{npz,pt}
     data/bacformer_prior/pack_report.txt  （每属实际填充统计 + fallback 决策审计）
 
-env: caiqy_bacformer_prior（python 3.11 + numpy；--output-formats pt 时需 torch）
+env: 历史 caiqy_bacformer_prior；--output-formats pt 时需 torch
 """
 from __future__ import annotations
 

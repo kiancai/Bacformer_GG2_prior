@@ -4,7 +4,8 @@
 # 实测（2026-05-29）"严格按 bacformer 作者 README 推荐"装包是不够的——
 # 作者 pyproject 用 `>=` 给一个最低版本兜底,但 pip 默认拉最新版,
 # 而最新版通常引入了 breaking changes / 与作者写时的生态不兼容.
-# 详细踩坑历程见 .claude/docs/bacformer_prior/experiments.md §8.
+# 历史踩坑记录见 MCFProjet
+# .agent/data/resources/bacformer_prior/archive/experiments_legacy_20260530.md。
 #
 # === 必须 pin 的关键依赖 (3 项不 pin 会死) ===
 # transformers <5,且 < 4.50

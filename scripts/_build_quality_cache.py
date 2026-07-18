@@ -7,7 +7,7 @@
 quality_score = completeness - 5×contamination（标准 MAG 质量打分，CheckM2 风格）。
 本表用于:
 - 3.embed.py 在 K_max cap 时选 top-K_max（按 quality 排序，超 cap 截）
-- 4.pack_tensor.py 同样按 quality 给 species 排位（决定 padding 顺序）
+- 4.build_protein_prior.py 按 quality 排序和加权聚合
 
 仅依赖标准库 + numpy（MiCoFormerV2 env）。一次性，几秒。
 """

@@ -14,9 +14,9 @@
 - 仅依赖标准库 + pyrodigal。运行 env: caiqy_bacformer_prior。
 
 用法（从 MCFProjet 根目录）：
-    python bacformer_prior/scripts/2b.prodigal.py                # 全量
-    python bacformer_prior/scripts/2b.prodigal.py --workers 12   # 调并行
-    python bacformer_prior/scripts/2b.prodigal.py --limit 50     # pilot 试跑
+    python data/bacformer_prior/_src/scripts/2b.prodigal.py                # 全量
+    python data/bacformer_prior/_src/scripts/2b.prodigal.py --workers 12   # 调并行
+    python data/bacformer_prior/_src/scripts/2b.prodigal.py --limit 50     # pilot
 """
 import argparse
 import gzip
